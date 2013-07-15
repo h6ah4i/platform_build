@@ -22,6 +22,65 @@
 
 import os
 import sys
+import scandir
+
+
+# note: entry.isdir() and entry.islink() returns False if it is a symbolic link of directory
+def is_dir_link(path):
+  return os.path.isdir(path)
+
+def perform_find_fast_rf(mindepth, pruneleaves, filename, rootdir, depth, result):
+  dirs = []
+
+#  print "dir = " + rootdir + "  depth = " + str(depth)
+
+  if not is_dir_link(rootdir):
+    return
+
+  # traverse all files/directories (until found the target file)
+  for entry in scandir.scandir(rootdir):
+    if entry.isdir() or entry.islink():
+      dirs.append(entry)
+    else:
+      # mindepth
+      if mindepth > 0:
+        if depth < mindepth:
+          continue
+
+      # match
+      if entry.name == filename:
+        result.append(os.path.join(rootdir, filename))
+        return
+
+  for d in dirs:
+    # prune
+    if d.name in pruneleaves:
+      continue
+
+    dirpath = os.path.join(rootdir, d.name);
+
+    # check if the item is directory
+    if d.islink() and (not is_dir_link(dirpath)):
+      continue
+
+    # find in sub directory
+    perform_find_fast_rf(\
+      mindepth, pruneleaves, filename, \
+      dirpath, depth + 1, result)
+
+  return
+
+def perform_find_fast(mindepth, prune, dirlist, filename):
+  result = []
+  pruneleaves = set(map(lambda x: os.path.split(x)[1], prune))
+
+  for rootdir in dirlist:
+    perform_find_fast_rf(\
+      mindepth, pruneleaves, filename,\
+      rootdir, 1, result)
+
+  return result
+
 
 def perform_find(mindepth, prune, dirlist, filename):
   result = []
@@ -45,6 +104,7 @@ def perform_find(mindepth, prune, dirlist, filename):
       # mindepth
       if mindepth > 0:
         depth = 1 + root.count("/") - rootdepth
+#        print "dir = " + root + "  depth = " + str(depth)
         if depth < mindepth:
           continue
       # match
@@ -61,6 +121,8 @@ Options:
    --prune=<dirname>
        Avoids returning results from inside any directory called <dirname>
        (e.g., "*/out/*"). May be used multiple times.
+   --traditional
+       Use traditional file search algorithm
 """ % {
       "progName": os.path.split(sys.argv[0])[1],
     })
@@ -69,6 +131,7 @@ Options:
 def main(argv):
   mindepth = -1
   prune = []
+  traditional = False
   i=1
   while i<len(argv) and len(argv[i])>2 and argv[i][0:2] == "--":
     arg = argv[i]
@@ -82,6 +145,8 @@ def main(argv):
       if len(p) == 0:
         usage()
       prune.append(p)
+    elif arg.startswith("--traditional"):
+      traditional = True
     else:
       usage()
     i += 1
@@ -89,7 +154,13 @@ def main(argv):
     usage()
   dirlist = argv[i:-1]
   filename = argv[-1]
-  results = list(set(perform_find(mindepth, prune, dirlist, filename)))
+
+  if traditional:
+    find_result = perform_find(mindepth, prune, dirlist, filename)
+  else:
+    find_result = perform_find_fast(mindepth, prune, dirlist, filename)
+
+  results = list(set(find_result))
   results.sort()
   for r in results:
     print r
